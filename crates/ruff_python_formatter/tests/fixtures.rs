@@ -52,7 +52,7 @@ fn black_compatibility() {
                         .expect("Expected a valid line number");
 
                     let range_start = line_index.line_start(lower, &content);
-                    let range_end = line_index.line_end(upper, &content);
+                    let range_end = line_index.line_end_exclusive(upper, &content);
 
                     Some(TextRange::new(range_start, range_end))
                 })
@@ -311,10 +311,13 @@ fn format_file(source: &str, options: &PyFormatOptions, input_path: &Path) -> St
                     )
                 });
 
+            eprintln!("Formatted code:\n{}", formatted.as_code());
+
             content.replace_range(
                 Range::<usize>::from(formatted.source_range()),
                 formatted.as_code(),
             );
+            eprintln!("content:\n{content}");
         }
 
         (Cow::Owned(without_markers), content)

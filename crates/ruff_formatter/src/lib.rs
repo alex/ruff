@@ -53,7 +53,7 @@ pub use crate::diagnostics::{ActualStart, FormatError, InvalidDocumentError, Pri
 pub use format_element::{normalize_newlines, FormatElement, LINE_TERMINATORS};
 pub use group_id::GroupId;
 use ruff_macros::CacheKey;
-use ruff_text_size::{TextLen, TextRange, TextSize};
+use ruff_text_size::{Ranged, TextLen, TextRange, TextSize};
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy, Hash, CacheKey)]
 #[cfg_attr(
@@ -433,16 +433,23 @@ impl Printed {
         std::mem::take(&mut self.verbatim_ranges)
     }
 
-    /// Slices the formatted code to the sub-slices that covers the passed `source_range`.
+    /// Slices the formatted code to the sub-slices that covers the passed `source_range` in `source`.
     ///
     /// The implementation uses the source map generated during formatting to find the closest range
     /// in the formatted document that covers `source_range` or more. The returned slice
     /// matches the `source_range` exactly (except indent, see below) if the formatter emits [`FormatElement::SourcePosition`] for
     /// the range's offsets.
     ///
+    /// ## Indentation
+    /// The indentation before `source_range.start` is replaced with the indentation returned by the formatter
+    /// to fix up incorrectly intended code.
+    ///
     /// Returns the entire document if the source map is empty.
+    ///
+    /// # Panics
+    /// If `source_range` points to offsets that are not in the bounds of `source`.
     #[must_use]
-    pub fn slice_range(self, source_range: TextRange) -> PrintedRange {
+    pub fn slice_range(self, source_range: TextRange, source: &str) -> PrintedRange {
         let mut start_marker: Option<SourceMarker> = None;
         let mut end_marker: Option<SourceMarker> = None;
 
@@ -473,13 +480,30 @@ impl Printed {
 
         let start = start_marker.map(|marker| marker.dest).unwrap_or_default();
         let end = end_marker.map_or_else(|| self.code.text_len(), |marker| marker.dest);
-        let code_range = TextRange::new(start, end);
+
+        let source_range = extend_range_to_include_indent(source_range, source);
+        let code_range = extend_range_to_include_indent(TextRange::new(start, end), &self.code);
 
         PrintedRange {
             code: self.code[code_range].to_string(),
             source_range,
         }
     }
+}
+
+/// Extends `range` backwards (by reducing `range.start`) to include any directly preceding whitespace (`\t` or ` `).
+///
+/// # Panics
+/// If `range.start` is out of `source`'s bounds.
+fn extend_range_to_include_indent(range: TextRange, source: &str) -> TextRange {
+    let whitespace_len: TextSize = source[..usize::from(range.start())]
+        .chars()
+        .rev()
+        .take_while(|c| matches!(c, ' ' | '\t'))
+        .map(TextLen::text_len)
+        .sum();
+
+    TextRange::new(range.start() - whitespace_len, range.end())
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
